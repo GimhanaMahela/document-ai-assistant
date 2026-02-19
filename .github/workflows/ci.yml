@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev, main]
+
+jobs:
+  lint:
+    name: Lint & Syntax Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install lint dependencies
+        run: pip install flake8
+
+      - name: Check for critical errors (syntax, undefined names)
+        run: |
+          flake8 . \
+            --count \
+            --select=E9,F63,F7,F82 \
+            --show-source \
+            --statistics \
+            --exclude=venv,__pycache__,.git
+
+      - name: Check style (warnings only, non-blocking)
+        run: |
+          flake8 . \
+            --count \
+            --exit-zero \
+            --max-line-length=120 \
+            --max-complexity=10 \
+            --statistics \
+            --exclude=venv,__pycache__,.git
+
+  validate-structure:
+    name: Validate Project Structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check required files exist
+        run: |
+          files=(
+            "app.py"
+            "chat_engine.py"
+            "vector_store.py"
+            "document_processor.py"
+            "database.py"
+            "utils.py"
+            "requirements.txt"
+            ".env.example"
+          )
+          missing=0
+          for f in "${files[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              missing=1
+            else
+              echo "OK: $f"
+            fi
+          done
+          exit $missing
+
+      - name: Check .env.example is not missing keys
+        run: |
+          required_keys=(
+            "OPENAI_API_KEY"
+            "CHUNK_SIZE"
+            "CHUNK_OVERLAP"
+            "PERSIST_DIRECTORY"
+            "DATABASE_PATH"
+            "MAX_FILE_SIZE_MB"
+          )
+          missing=0
+          for key in "${required_keys[@]}"; do
+            if ! grep -q "$key" .env.example; then
+              echo "MISSING KEY in .env.example: $key"
+              missing=1
+            else
+              echo "OK: $key"
+            fi
+          done
+          exit $missing
