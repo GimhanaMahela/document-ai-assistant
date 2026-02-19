@@ -122,6 +122,17 @@ class DatabaseManager:
             df = pd.read_sql_query(query, conn, params=(session_id, limit))
             return df.to_dict('records')
     
+    def document_exists(self, file_hash: str) -> Optional[Dict]:
+        """Check if a document with the given hash already exists."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, file_name FROM documents WHERE file_hash = ?",
+                (file_hash,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def get_document_stats(self) -> Dict:
         """Get statistics about uploaded documents."""
         with self.get_connection() as conn:

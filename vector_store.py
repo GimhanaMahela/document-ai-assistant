@@ -9,9 +9,26 @@ from langchain.vectorstores import Chroma, FAISS
 from langchain.schema import Document
 import chromadb
 import os
+import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+@st.cache_resource(show_spinner="Loading embedding model...")
+def _load_openai_embeddings(api_key: str):
+    """Load and cache OpenAI embeddings. Runs once per session."""
+    return OpenAIEmbeddings(
+        openai_api_key=api_key,
+        model="text-embedding-ada-002"
+    )
+
+
+@st.cache_resource(show_spinner="Loading embedding model...")
+def _load_huggingface_embeddings():
+    """Load and cache HuggingFace embeddings. Runs once per session."""
+    from langchain.embeddings import HuggingFaceEmbeddings
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 class VectorStoreManager:
     """
@@ -40,23 +57,11 @@ class VectorStoreManager:
         self.vector_store = None
     
     def _get_embeddings(self):
-        """
-        Get embedding model.
-        Uses free local HuggingFace embeddings by default.
-        Falls back to OpenAI if OPENAI_API_KEY is set.
-        """
+        """Return cached embedding model (OpenAI or local HuggingFace)."""
         api_key = os.getenv('OPENAI_API_KEY')
-
         if api_key:
-            return OpenAIEmbeddings(
-                openai_api_key=api_key,
-                model="text-embedding-ada-002"
-            )
-        else:
-            from langchain.embeddings import HuggingFaceEmbeddings
-            return HuggingFaceEmbeddings(
-                model_name="all-MiniLM-L6-v2"
-            )
+            return _load_openai_embeddings(api_key)
+        return _load_huggingface_embeddings()
     
     def create_vector_store(self, documents: List[Document], 
                            collection_name: str = "documents"):
