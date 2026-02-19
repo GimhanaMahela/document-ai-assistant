@@ -48,12 +48,12 @@ Phase 8 → Deployment                            (Ship it)
 
 | # | Improvement | File / Location | Effort | Status |
 |---|---|---|---|---|
-| 1.1 | Model caching with `@st.cache_resource` — models reload on every rerun | `chat_engine.py`, `vector_store.py` | Low | `[ ]` |
-| 1.2 | Fix hardcoded `document_ids=[1]` — chat records not linked to real documents | `app.py:277` | Low | `[ ]` |
-| 1.3 | Fix broken sidebar placeholder image URL | `app.py:80` | Low | `[ ]` |
-| 1.4 | Add `.env.example` — new developers have no template to configure from | root | Low | `[ ]` |
-| 1.5 | Explicit duplicate file warning — currently silently replaces on re-upload | `database.py:88`, `app.py` | Low | `[ ]` |
-| 1.6 | File size limit enforcement on upload with clear user message | `app.py` | Low | `[ ]` |
+| 1.1 | Model caching with `@st.cache_resource` — models reload on every rerun | `chat_engine.py`, `vector_store.py` | Low | `[x]` |
+| 1.2 | Fix hardcoded `document_ids=[1]` — chat records not linked to real documents | `app.py:277` | Low | `[x]` |
+| 1.3 | Fix broken sidebar placeholder image URL | `app.py:80` | Low | `[x]` |
+| 1.4 | Add `.env.example` — new developers have no template to configure from | root | Low | `[x]` |
+| 1.5 | Explicit duplicate file warning — currently silently replaces on re-upload | `database.py:88`, `app.py` | Low | `[x]` |
+| 1.6 | File size limit enforcement on upload with clear user message | `app.py` | Low | `[x]` |
 
 ---
 
@@ -156,6 +156,7 @@ Phase 8 → Deployment                            (Ship it)
 | Date | Feature Merged to Dev | Phase | Status Changed | Updated By |
 |---|---|---|---|---|
 | 2026-02-19 | Initial project setup | — | — | B.M.G.Gimhana Mahela |
+| 2026-02-19 | Phase 1 — all 6 foundation fixes | Phase 1 | All `[x]` | B.M.G.Gimhana Mahela |
 
 ---
 
