@@ -4,6 +4,11 @@ Provides UI for document upload, processing, and Q&A.
 """
 
 import os
+
+# Must be set before any chromadb import (including via LangChain's Chroma wrapper)
+# Disables telemetry on ALL ChromaDB client instances, not just our explicit ones.
+os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
