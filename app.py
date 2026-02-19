@@ -3,6 +3,7 @@ Main Streamlit application for Document-Aware AI Assistant.
 Provides UI for document upload, processing, and Q&A.
 """
 
+import os
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -72,12 +73,14 @@ def init_session_state():
         st.session_state.messages = []
     if 'documents_processed' not in st.session_state:
         st.session_state.documents_processed = False
+    if 'processed_document_ids' not in st.session_state:
+        st.session_state.processed_document_ids = []
 
 # Sidebar
 def render_sidebar():
     """Render sidebar with configuration options."""
     with st.sidebar:
-        st.image("https://via.placeholder.com/300x100/1E88E5/FFFFFF?text=AI+Assistant", use_column_width=True)
+        st.markdown("## 🤖 Document AI Assistant")
         
         st.markdown("## 📁 Document Upload")
         
@@ -146,37 +149,62 @@ def process_documents(uploaded_files, chunk_size, chunk_overlap):
         
         progress_bar = st.progress(0)
         
+        max_file_size_mb = int(os.getenv('MAX_FILE_SIZE_MB', 50))
+        max_file_size_bytes = max_file_size_mb * 1024 * 1024
+
         for i, uploaded_file in enumerate(uploaded_files):
             try:
                 # Read file content
                 file_content = uploaded_file.getvalue()
-                
+
+                # 1.6 — File size limit enforcement
+                if len(file_content) > max_file_size_bytes:
+                    st.warning(
+                        f"Skipped **{uploaded_file.name}**: "
+                        f"File size ({len(file_content) // (1024*1024)}MB) "
+                        f"exceeds the {max_file_size_mb}MB limit."
+                    )
+                    progress_bar.progress((i + 1) / len(uploaded_files))
+                    continue
+
                 # Validate file type
                 if not validate_file_type(uploaded_file.name):
-                    st.warning(f"Skipped {uploaded_file.name}: Unsupported file type")
+                    st.warning(f"Skipped **{uploaded_file.name}**: Unsupported file type.")
+                    progress_bar.progress((i + 1) / len(uploaded_files))
                     continue
-                
+
+                # 1.5 — Explicit duplicate file detection
+                file_hash = generate_file_hash(file_content)
+                existing = st.session_state.db_manager.document_exists(file_hash)
+                if existing:
+                    st.warning(
+                        f"Skipped **{uploaded_file.name}**: Already uploaded as "
+                        f"**{existing['file_name']}** (duplicate detected)."
+                    )
+                    progress_bar.progress((i + 1) / len(uploaded_files))
+                    continue
+
                 # Process document
                 result = st.session_state.processor.process_document(
                     file_content,
                     uploaded_file.name
                 )
-                
+
                 all_chunks.extend(result['chunks'])
-                
-                # Record in database
-                file_hash = generate_file_hash(file_content)
-                st.session_state.db_manager.add_document_record(
+
+                # 1.2 — Record in database and capture real document ID
+                doc_id = st.session_state.db_manager.add_document_record(
                     file_name=uploaded_file.name,
                     file_hash=file_hash,
                     file_size=len(file_content),
                     chunk_count=result['total_chunks'],
                     metadata=result['metadata']
                 )
-                
+                st.session_state.processed_document_ids.append(doc_id)
+
                 # Update progress
                 progress_bar.progress((i + 1) / len(uploaded_files))
-                
+
             except Exception as e:
                 st.error(f"Error processing {uploaded_file.name}: {str(e)}")
                 logger.error(f"Processing error: {e}")
@@ -268,12 +296,12 @@ def render_chat_interface():
             "sources": response.get("sources", [])
         })
         
-        # Save to database
+        # Save to database with real document IDs
         st.session_state.db_manager.add_chat_record(
             session_id=st.session_state.session_id,
             question=prompt,
             answer=response["answer"],
-            document_ids=[1],  # This would need proper document ID tracking
+            document_ids=st.session_state.processed_document_ids,
             metadata={"source_count": len(response.get("sources", []))}
         )
 

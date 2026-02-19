@@ -10,9 +10,42 @@ from langchain.llms import OpenAI
 from langchain.chat_models import ChatOpenAI
 from langchain.callbacks import StreamingStdOutCallbackHandler
 import os
+import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+@st.cache_resource(show_spinner="Loading AI model...")
+def _load_openai_llm(api_key: str):
+    """Load and cache OpenAI LLM. Runs once per session."""
+    return ChatOpenAI(
+        model="gpt-3.5-turbo",
+        temperature=0.7,
+        streaming=True,
+        callbacks=[StreamingStdOutCallbackHandler()]
+    )
+
+
+@st.cache_resource(show_spinner="Loading local AI model (this may take a minute)...")
+def _load_local_llm():
+    """Load and cache local Flan-T5 model. Runs once per session."""
+    from langchain.llms import HuggingFacePipeline
+    from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
+
+    model_name = "google/flan-t5-base"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+
+    pipe = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        max_new_tokens=512,
+        temperature=0.7,
+        do_sample=True,
+    )
+    return HuggingFacePipeline(pipeline=pipe)
 
 class RAGChatEngine:
     """
@@ -32,33 +65,11 @@ class RAGChatEngine:
         self._setup_chain()
     
     def _get_llm(self):
-        """Initialize LLM (OpenAI or local)."""
+        """Return cached LLM instance (OpenAI or local Flan-T5)."""
         api_key = os.getenv('OPENAI_API_KEY')
-
         if api_key:
-            return ChatOpenAI(
-                model="gpt-3.5-turbo",
-                temperature=0.7,
-                streaming=True,
-                callbacks=[StreamingStdOutCallbackHandler()]
-            )
-        else:
-            from langchain.llms import HuggingFacePipeline
-            from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
-
-            model_name = "google/flan-t5-base"
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-
-            pipe = pipeline(
-                "text-generation",
-                model=model,
-                tokenizer=tokenizer,
-                max_new_tokens=512,
-                temperature=0.7,
-                do_sample=True,
-            )
-            return HuggingFacePipeline(pipeline=pipe)
+            return _load_openai_llm(api_key)
+        return _load_local_llm()
     
     def _setup_chain(self):
         """Setup the QA chain with custom prompt."""
