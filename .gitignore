@@ -30,3 +30,6 @@ Thumbs.db
 
 # HuggingFace model cache
 .cache/
+
+# Streamlit — track config.toml but ignore secrets
+.streamlit/secrets.toml
