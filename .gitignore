@@ -1,0 +1,32 @@
+# Virtual environment
+venv/
+env/
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Data & database files
+data/chroma_db/
+data/uploaded/
+chat_history.db
+*.db
+
+# Logs
+logs/
+*.log
+app.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# HuggingFace model cache
+.cache/
