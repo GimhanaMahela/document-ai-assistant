@@ -1,14 +1,13 @@
 """
 RAG implementation using LangChain.
 Handles question answering with retrieved context.
+
+LLM priority: Groq (llama-3.3-70b-versatile) → OpenAI → Local Flan-T5
 """
 
 from typing import List, Dict, Any, Optional
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.llms import OpenAI
-from langchain.chat_models import ChatOpenAI
-from langchain.callbacks import StreamingStdOutCallbackHandler
 import os
 import streamlit as st
 from dotenv import load_dotenv
@@ -16,9 +15,27 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-@st.cache_resource(show_spinner="Loading AI model...")
+# ── Cached LLM loaders ────────────────────────────────────────────────────────
+# @st.cache_resource ensures each model loads exactly once per session.
+# Without this, the model would reload on every Streamlit rerun (every click).
+
+@st.cache_resource(show_spinner="Connecting to Groq...")
+def _load_groq_llm(api_key: str, model_name: str):
+    """Load and cache Groq LLM. Fastest inference, free tier available."""
+    from langchain_groq import ChatGroq
+    return ChatGroq(
+        groq_api_key=api_key,
+        model_name=model_name,
+        temperature=0.7,
+        streaming=True,
+    )
+
+
+@st.cache_resource(show_spinner="Connecting to OpenAI...")
 def _load_openai_llm(api_key: str):
-    """Load and cache OpenAI LLM. Runs once per session."""
+    """Load and cache OpenAI LLM."""
+    from langchain.chat_models import ChatOpenAI
+    from langchain.callbacks import StreamingStdOutCallbackHandler
     return ChatOpenAI(
         model="gpt-3.5-turbo",
         temperature=0.7,
@@ -27,9 +44,9 @@ def _load_openai_llm(api_key: str):
     )
 
 
-@st.cache_resource(show_spinner="Loading local AI model (this may take a minute)...")
+@st.cache_resource(show_spinner="Loading local Flan-T5 model (first run may take a minute)...")
 def _load_local_llm():
-    """Load and cache local Flan-T5 model. Runs once per session."""
+    """Load and cache local Flan-T5 model. No API key needed, runs offline."""
     from langchain.llms import HuggingFacePipeline
     from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 
@@ -47,59 +64,90 @@ def _load_local_llm():
     )
     return HuggingFacePipeline(pipeline=pipe)
 
+
+# ── Provider info ─────────────────────────────────────────────────────────────
+
+def get_active_provider() -> Dict[str, str]:
+    """
+    Return active LLM provider info for display in the UI.
+    Priority order: Groq → OpenAI → Local Flan-T5
+    """
+    groq_key = os.getenv('GROQ_API_KEY')
+    if groq_key:
+        model = os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')
+        return {"provider": "Groq", "model": model, "icon": "⚡"}
+
+    openai_key = os.getenv('OPENAI_API_KEY')
+    if openai_key:
+        return {"provider": "OpenAI", "model": "gpt-3.5-turbo", "icon": "🤖"}
+
+    return {"provider": "Local", "model": "Flan-T5-Base", "icon": "💻"}
+
+
+# ── RAG Chat Engine ───────────────────────────────────────────────────────────
+
 class RAGChatEngine:
     """
-    Implements Retrieval-Augmented Generation for document-based Q&A.
+    Retrieval-Augmented Generation engine for document-based Q&A.
+
+    LLM selection priority:
+        1. Groq  — if GROQ_API_KEY is set in .env  (fastest, free tier)
+        2. OpenAI — if OPENAI_API_KEY is set in .env
+        3. Flan-T5 — local fallback, no API key required
     """
-    
+
     def __init__(self, vector_store):
         """
-        Initialize chat engine.
-        
+        Initialize the chat engine.
+
         Args:
-            vector_store: Initialized vector store for retrieval
+            vector_store: Initialized VectorStoreManager instance.
         """
         self.vector_store = vector_store
         self.llm = self._get_llm()
         self.qa_chain = None
         self._setup_chain()
-    
+
     def _get_llm(self):
-        """Return cached LLM instance (OpenAI or local Flan-T5)."""
-        api_key = os.getenv('OPENAI_API_KEY')
-        if api_key:
-            return _load_openai_llm(api_key)
+        """Return the cached LLM based on available API keys."""
+        groq_key = os.getenv('GROQ_API_KEY')
+        if groq_key:
+            model = os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')
+            return _load_groq_llm(groq_key, model)
+
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if openai_key:
+            return _load_openai_llm(openai_key)
+
         return _load_local_llm()
-    
+
     def _setup_chain(self):
-        """Setup the QA chain with custom prompt."""
-        
-        # Custom prompt template
-        template = """
-        You are a helpful AI assistant answering questions based on the provided context.
-        
-        Context from documents:
-        {context}
-        
-        Question: {question}
-        
-        Instructions:
-        - Answer based ONLY on the provided context
-        - If the answer isn't in the context, say "I cannot find this information in the provided documents"
-        - Be concise but thorough
-        - Include relevant details from the context
-        
-        Answer:"""
-        
+        """Build the RetrievalQA chain with a custom prompt template."""
+        template = """You are a helpful AI assistant answering questions \
+based on the provided context.
+
+Context from documents:
+{context}
+
+Question: {question}
+
+Instructions:
+- Answer based ONLY on the provided context
+- If the answer isn't in the context, say \
+"I cannot find this information in the provided documents"
+- Be concise but thorough
+- Include relevant details from the context
+
+Answer:"""
+
         prompt = PromptTemplate(
             template=template,
             input_variables=["context", "question"]
         )
-        
-        # Create retrieval QA chain
+
         self.qa_chain = RetrievalQA.from_chain_type(
             llm=self.llm,
-            chain_type="stuff",  # Can be "map_reduce", "refine", "map_rerank"
+            chain_type="stuff",
             retriever=self.vector_store.vector_store.as_retriever(
                 search_kwargs={"k": 4}
             ),
@@ -109,26 +157,29 @@ class RAGChatEngine:
             },
             return_source_documents=True
         )
-    
+
     def ask(self, question: str) -> Dict[str, Any]:
         """
-        Ask a question and get answer based on documents.
-        
+        Ask a question and get a grounded answer from uploaded documents.
+
         Args:
-            question: User's question
-        
+            question: User's natural language question.
+
         Returns:
-            Dictionary with answer and source documents
+            Dict with 'answer' (str) and 'sources' (list of dicts).
         """
         if not self.qa_chain:
+            provider = get_active_provider()
             return {
-                "answer": "LLM not configured. Please set up OpenAI API key or local LLM.",
+                "answer": (
+                    f"LLM not configured. "
+                    f"Please set GROQ_API_KEY in your .env file to use {provider['provider']}."
+                ),
                 "sources": []
             }
-        
+
         try:
             result = self.qa_chain({"query": question})
-            
             return {
                 "answer": result["result"],
                 "sources": [
@@ -144,10 +195,7 @@ class RAGChatEngine:
                 "answer": f"Error processing question: {str(e)}",
                 "sources": []
             }
-    
+
     def ask_streaming(self, question: str):
-        """
-        Streaming version of ask for real-time responses.
-        """
-        # Implementation for streaming responses
+        """Streaming version of ask — to be implemented in Phase 2."""
         pass
