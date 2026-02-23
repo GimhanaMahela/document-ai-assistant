@@ -5,19 +5,24 @@ Handles question answering with retrieved context.
 LLM priority: Groq (llama-3.3-70b-versatile) → OpenAI → Local Flan-T5
 """
 
-from typing import List, Dict, Any, Optional
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+# stdlib first (C0411 fix)
 import os
+from typing import Dict, Any  # removed unused List, Optional (W0611 fix)
+
+# third-party
 import streamlit as st
 from dotenv import load_dotenv
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
 
 load_dotenv()
 
 
 # ── Cached LLM loaders ────────────────────────────────────────────────────────
-# @st.cache_resource ensures each model loads exactly once per session.
-# Without this, the model would reload on every Streamlit rerun (every click).
+# Imports are intentionally inside these functions (lazy loading).
+# This avoids loading all three heavy libraries on startup — only the
+# selected provider's library is imported at runtime.
+# pylint: disable=import-outside-toplevel
 
 @st.cache_resource(show_spinner="Connecting to Groq...")
 def _load_groq_llm(api_key: str, model_name: str):
@@ -38,6 +43,7 @@ def _load_openai_llm(api_key: str):
     from langchain.callbacks import StreamingStdOutCallbackHandler
     return ChatOpenAI(
         model="gpt-3.5-turbo",
+        openai_api_key=api_key,
         temperature=0.7,
         streaming=True,
         callbacks=[StreamingStdOutCallbackHandler()]
@@ -63,6 +69,8 @@ def _load_local_llm():
         do_sample=True,
     )
     return HuggingFacePipeline(pipeline=pipe)
+
+# pylint: enable=import-outside-toplevel
 
 
 # ── Provider info ─────────────────────────────────────────────────────────────
@@ -91,7 +99,7 @@ class RAGChatEngine:
     Retrieval-Augmented Generation engine for document-based Q&A.
 
     LLM selection priority:
-        1. Groq  — if GROQ_API_KEY is set in .env  (fastest, free tier)
+        1. Groq   — if GROQ_API_KEY is set in .env  (fastest, free tier)
         2. OpenAI — if OPENAI_API_KEY is set in .env
         3. Flan-T5 — local fallback, no API key required
     """
@@ -173,7 +181,8 @@ Answer:"""
             return {
                 "answer": (
                     f"LLM not configured. "
-                    f"Please set GROQ_API_KEY in your .env file to use {provider['provider']}."
+                    f"Please set GROQ_API_KEY in your .env file "
+                    f"to use {provider['provider']}."
                 ),
                 "sources": []
             }
@@ -190,12 +199,14 @@ Answer:"""
                     for doc in result["source_documents"]
                 ]
             }
-        except Exception as e:
+        except (ValueError, RuntimeError, KeyError) as e:  # W0718 fix
             return {
                 "answer": f"Error processing question: {str(e)}",
                 "sources": []
             }
 
-    def ask_streaming(self, question: str):
+    def ask_streaming(self, question: str) -> None:
         """Streaming version of ask — to be implemented in Phase 2."""
-        pass
+        raise NotImplementedError(  # W0107 fix: pass → NotImplementedError
+            f"Streaming is not yet implemented. Question was: {question}"
+        )
