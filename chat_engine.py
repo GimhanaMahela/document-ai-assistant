@@ -1,19 +1,21 @@
 """
-RAG implementation using LangChain.
-Handles question answering with retrieved context.
+RAG implementation using a LangGraph ReAct agent.
+The agent decides when to search documents or summarise them,
+and maintains conversation history across turns.
 
 LLM priority: Groq (llama-3.3-70b-versatile) → OpenAI → Local Flan-T5
 """
 
-# stdlib first (C0411 fix)
+# stdlib
 import os
-from typing import Dict, Any  # removed unused List, Optional (W0611 fix)
+from typing import Dict, Any, List
 
 # third-party
 import streamlit as st
 from dotenv import load_dotenv
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langgraph.prebuilt import create_react_agent
+from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage
 
 load_dotenv()
 
@@ -32,28 +34,24 @@ def _load_groq_llm(api_key: str, model_name: str):
         groq_api_key=api_key,
         model_name=model_name,
         temperature=0.7,
-        streaming=True,
     )
 
 
 @st.cache_resource(show_spinner="Connecting to OpenAI...")
 def _load_openai_llm(api_key: str):
     """Load and cache OpenAI LLM."""
-    from langchain.chat_models import ChatOpenAI
-    from langchain.callbacks import StreamingStdOutCallbackHandler
+    from langchain_openai import ChatOpenAI
     return ChatOpenAI(
         model="gpt-3.5-turbo",
         openai_api_key=api_key,
         temperature=0.7,
-        streaming=True,
-        callbacks=[StreamingStdOutCallbackHandler()]
     )
 
 
 @st.cache_resource(show_spinner="Loading local Flan-T5 model (first run may take a minute)...")
 def _load_local_llm():
     """Load and cache local Flan-T5 model. No API key needed, runs offline."""
-    from langchain.llms import HuggingFacePipeline
+    from langchain_community.llms import HuggingFacePipeline
     from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 
     model_name = "google/flan-t5-base"
@@ -61,12 +59,10 @@ def _load_local_llm():
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
     pipe = pipeline(
-        "text-generation",
+        "text2text-generation",
         model=model,
         tokenizer=tokenizer,
         max_new_tokens=512,
-        temperature=0.7,
-        do_sample=True,
     )
     return HuggingFacePipeline(pipeline=pipe)
 
@@ -92,11 +88,17 @@ def get_active_provider() -> Dict[str, str]:
     return {"provider": "Local", "model": "Flan-T5-Base", "icon": "💻"}
 
 
-# ── RAG Chat Engine ───────────────────────────────────────────────────────────
+# ── ReAct Agent Chat Engine ───────────────────────────────────────────────────
 
 class RAGChatEngine:
     """
-    Retrieval-Augmented Generation engine for document-based Q&A.
+    ReAct agent for document-based Q&A.
+
+    The agent reasons step-by-step and decides which tool to call:
+      - document_search: similarity search over uploaded documents
+      - document_summariser: retrieves all chunks for a full summary
+
+    Conversation history is maintained across turns in a session.
 
     LLM selection priority:
         1. Groq   — if GROQ_API_KEY is set in .env  (fastest, free tier)
@@ -105,16 +107,11 @@ class RAGChatEngine:
     """
 
     def __init__(self, vector_store):
-        """
-        Initialize the chat engine.
-
-        Args:
-            vector_store: Initialized VectorStoreManager instance.
-        """
         self.vector_store = vector_store
+        self._last_retrieved_docs: List = []
+        self.chat_history: List = []
         self.llm = self._get_llm()
-        self.qa_chain = None
-        self._setup_chain()
+        self.agent = self._build_agent()
 
     def _get_llm(self):
         """Return the cached LLM based on available API keys."""
@@ -129,42 +126,54 @@ class RAGChatEngine:
 
         return _load_local_llm()
 
-    def _setup_chain(self):
-        """Build the RetrievalQA chain with a custom prompt template."""
-        template = """You are a helpful AI assistant answering questions \
-based on the provided context.
+    def _build_tools(self) -> List:
+        """Build the tool list the agent can call."""
+        vector_store = self.vector_store
 
-Context from documents:
-{context}
+        # Use a list so the closure can append to it from within the tool.
+        retrieved_bucket: List = []
 
-Question: {question}
+        @tool
+        def document_search(query: str) -> str:
+            """Search the uploaded documents for information relevant to the query.
+            Use this whenever the user asks a specific question about the documents."""
+            docs = vector_store.similarity_search(query, k=4)
+            retrieved_bucket.extend(docs)
+            if not docs:
+                return "No relevant content found in the uploaded documents."
+            parts = []
+            for doc in docs:
+                src = doc.metadata.get("source_file", "unknown")
+                parts.append(f"[Source: {src}]\n{doc.page_content}")
+            return "\n\n---\n\n".join(parts)
 
-Instructions:
-- Answer based ONLY on the provided context
-- If the answer isn't in the context, say \
-"I cannot find this information in the provided documents"
-- Be concise but thorough
-- Include relevant details from the context
+        @tool
+        def document_summariser() -> str:
+            """Retrieve the full content of all uploaded documents so you can write
+            a comprehensive summary. Use this when the user asks for a summary or
+            overview of the documents."""
+            try:
+                data = vector_store.vector_store.get()
+                texts = data.get("documents", [])[:40]
+                metadatas = data.get("metadatas", []) or []
+                if not texts:
+                    return "No documents found in the vector store."
+                parts = []
+                for text, meta in zip(texts, metadatas):
+                    src = (meta or {}).get("source_file", "unknown")
+                    parts.append(f"[Source: {src}]\n{text}")
+                return "\n\n---\n\n".join(parts)
+            except Exception as e:  # pylint: disable=broad-except
+                return f"Could not retrieve documents for summarisation: {e}"
 
-Answer:"""
+        # Store the bucket reference so ask() can read collected docs.
+        self._retrieved_bucket = retrieved_bucket
+        return [document_search, document_summariser]
 
-        prompt = PromptTemplate(
-            template=template,
-            input_variables=["context", "question"]
-        )
-
-        self.qa_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type="stuff",
-            retriever=self.vector_store.vector_store.as_retriever(
-                search_kwargs={"k": 4}
-            ),
-            chain_type_kwargs={
-                "prompt": prompt,
-                "verbose": True
-            },
-            return_source_documents=True
-        )
+    def _build_agent(self):
+        """Build the LangGraph ReAct agent."""
+        tools = self._build_tools()
+        return create_react_agent(self.llm, tools)
 
     def ask(self, question: str) -> Dict[str, Any]:
         """
@@ -176,37 +185,36 @@ Answer:"""
         Returns:
             Dict with 'answer' (str) and 'sources' (list of dicts).
         """
-        if not self.qa_chain:
-            provider = get_active_provider()
-            return {
-                "answer": (
-                    f"LLM not configured. "
-                    f"Please set GROQ_API_KEY in your .env file "
-                    f"to use {provider['provider']}."
-                ),
-                "sources": []
-            }
+        if not self.agent:
+            return {"answer": "Agent not initialised.", "sources": []}
+
+        # Reset per-turn doc bucket.
+        self._retrieved_bucket.clear()
+
+        messages = self.chat_history + [HumanMessage(content=question)]
 
         try:
-            result = self.qa_chain({"query": question})
-            return {
-                "answer": result["result"],
-                "sources": [
-                    {
-                        "content": doc.page_content[:200] + "...",
-                        "metadata": doc.metadata
-                    }
-                    for doc in result["source_documents"]
-                ]
-            }
-        except (ValueError, RuntimeError, KeyError) as e:  # W0718 fix
-            return {
-                "answer": f"Error processing question: {str(e)}",
-                "sources": []
-            }
+            response = self.agent.invoke({"messages": messages})
+            final_message = response["messages"][-1]
+            answer = final_message.content
+
+            # Persist full message list for the next turn.
+            self.chat_history = response["messages"]
+
+            sources = [
+                {
+                    "content": doc.page_content[:200] + "...",
+                    "metadata": doc.metadata,
+                }
+                for doc in self._retrieved_bucket
+            ]
+            return {"answer": answer, "sources": sources}
+
+        except (ValueError, RuntimeError, KeyError) as e:
+            return {"answer": f"Error processing question: {e}", "sources": []}
 
     def ask_streaming(self, question: str) -> None:
         """Streaming version of ask — to be implemented in Phase 2."""
-        raise NotImplementedError(  # W0107 fix: pass → NotImplementedError
+        raise NotImplementedError(
             f"Streaming is not yet implemented. Question was: {question}"
         )

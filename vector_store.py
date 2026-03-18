@@ -4,9 +4,9 @@ Handles embedding generation and similarity search.
 """
 
 from typing import List, Dict, Any, Optional
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Chroma, FAISS
-from langchain.schema import Document
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma, FAISS
+from langchain_core.documents import Document
 import chromadb
 import os
 import streamlit as st
@@ -60,8 +60,15 @@ class VectorStoreManager:
         """Return cached embedding model (OpenAI or local HuggingFace)."""
         api_key = os.getenv('OPENAI_API_KEY')
         if api_key:
-            return _load_openai_embeddings(api_key)
-        return _load_huggingface_embeddings()
+            return OpenAIEmbeddings(
+                openai_api_key=api_key,
+                model="text-embedding-ada-002"
+            )
+        else:
+            from langchain_community.embeddings import HuggingFaceEmbeddings
+            return HuggingFaceEmbeddings(
+                model_name="all-MiniLM-L6-v2"
+            )
     
     def create_vector_store(self, documents: List[Document], 
                            collection_name: str = "documents"):
