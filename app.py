@@ -17,7 +17,7 @@ from typing import Optional
 
 from document_processor import DocumentProcessor
 from vector_store import VectorStoreManager
-from chat_engine import RAGChatEngine, get_active_provider, get_active_provider
+from chat_engine import RAGChatEngine, get_active_provider
 from database import DatabaseManager
 from utils import (
     setup_directories, validate_file_type, 
