@@ -1,0 +1,4 @@
+[server]
+# Prevents Streamlit's file watcher from inspecting torch.classes internals,
+# which causes: "Tried to instantiate class '__path__._path'" on startup.
+fileWatcherType = "poll"
