@@ -46,8 +46,8 @@ def _load_groq_llm(api_key: str, model_name: str):
     """Load and cache Groq LLM. Fastest inference, free tier available."""
     from langchain_groq import ChatGroq
     return ChatGroq(
-        groq_api_key=api_key,
-        model_name=model_name,
+        api_key=api_key,
+        model=model_name,
         temperature=0.7,
     )
 
@@ -66,7 +66,7 @@ def _load_openai_llm(api_key: str):
 @st.cache_resource(show_spinner="Loading local Flan-T5 model (first run may take a minute)...")
 def _load_local_llm():
     """Load and cache local Flan-T5 model. No API key needed, runs offline."""
-    from langchain_community.llms import HuggingFacePipeline
+    from langchain_huggingface import HuggingFacePipeline
     from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 
     model_name = "google/flan-t5-base"
@@ -74,7 +74,7 @@ def _load_local_llm():
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
     pipe = pipeline(
-        "text2text-generation",
+        "text-generation",
         model=model,
         tokenizer=tokenizer,
         max_new_tokens=512,
