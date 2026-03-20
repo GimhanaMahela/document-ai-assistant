@@ -8,6 +8,7 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import Chroma, FAISS
 from langchain.schema import Document
 import chromadb
+from chromadb.config import Settings
 import os
 import streamlit as st
 from dotenv import load_dotenv
@@ -49,9 +50,11 @@ class VectorStoreManager:
         # Initialize embeddings
         self.embeddings = self._get_embeddings()
         
-        # Initialize ChromaDB client
+        # Initialize ChromaDB client with telemetry disabled
+        # (prevents posthog API mismatch error on startup)
         self.chroma_client = chromadb.PersistentClient(
-            path=persist_directory
+            path=persist_directory,
+            settings=Settings(anonymized_telemetry=False)
         )
         
         self.vector_store = None

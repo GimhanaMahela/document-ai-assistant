@@ -4,6 +4,11 @@ Provides UI for document upload, processing, and Q&A.
 """
 
 import os
+
+# Must be set before any chromadb import (including via LangChain's Chroma wrapper)
+# Disables telemetry on ALL ChromaDB client instances, not just our explicit ones.
+os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -80,7 +85,24 @@ def init_session_state():
 def render_sidebar():
     """Render sidebar with configuration options."""
     with st.sidebar:
-        st.markdown("## 🤖 Document AI Assistant")
+        st.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #1E88E5, #1565C0);
+                padding: 18px 12px;
+                border-radius: 8px;
+                text-align: center;
+                margin-bottom: 8px;
+            ">
+                <div style="font-size: 2.2rem; line-height: 1;">🤖</div>
+                <div style="color: white; font-size: 1.05rem; font-weight: 700;
+                            margin-top: 6px; letter-spacing: 0.3px;">
+                    Document AI Assistant
+                </div>
+                <div style="color: #BBDEFB; font-size: 0.72rem; margin-top: 3px;">
+                    Powered by RAG + LangChain
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
         
         st.markdown("## 📁 Document Upload")
         
