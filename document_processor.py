@@ -5,12 +5,12 @@ Implements chunking strategies and text extraction.
 
 import os
 from typing import List, Dict, Any, Generator
-from langchain.text_splitter import (
+from langchain_text_splitters import (
     RecursiveCharacterTextSplitter,
     MarkdownTextSplitter
 )
-from langchain.document_loaders import PyPDFLoader, TextLoader
-from langchain.schema import Document
+from langchain_community.document_loaders import PyPDFLoader, TextLoader
+from langchain_core.documents import Document
 import tempfile
 
 class DocumentProcessor:

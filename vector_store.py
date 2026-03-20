@@ -4,12 +4,13 @@ Handles embedding generation and similarity search.
 """
 
 from typing import List, Dict, Any, Optional
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Chroma, FAISS
-from langchain.schema import Document
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma, FAISS
+from langchain_core.documents import Document
 import chromadb
-from chromadb.config import Settings
+from chromadb.config import Settings as ChromaSettings
 import os
+import shutil
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -28,7 +29,7 @@ def _load_openai_embeddings(api_key: str):
 @st.cache_resource(show_spinner="Loading embedding model...")
 def _load_huggingface_embeddings():
     """Load and cache HuggingFace embeddings. Runs once per session."""
-    from langchain.embeddings import HuggingFaceEmbeddings
+    from langchain_huggingface import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 class VectorStoreManager:
@@ -50,12 +51,18 @@ class VectorStoreManager:
         # Initialize embeddings
         self.embeddings = self._get_embeddings()
         
-        # Initialize ChromaDB client with telemetry disabled
-        # (prevents posthog API mismatch error on startup)
-        self.chroma_client = chromadb.PersistentClient(
-            path=persist_directory,
-            settings=Settings(anonymized_telemetry=False)
-        )
+        # Initialize ChromaDB client (reset on schema corruption)
+        _chroma_settings = ChromaSettings(anonymized_telemetry=False)
+        try:
+            self.chroma_client = chromadb.PersistentClient(
+                path=persist_directory, settings=_chroma_settings
+            )
+        except (ValueError, Exception):
+            shutil.rmtree(persist_directory, ignore_errors=True)
+            os.makedirs(persist_directory, exist_ok=True)
+            self.chroma_client = chromadb.PersistentClient(
+                path=persist_directory, settings=_chroma_settings
+            )
         
         self.vector_store = None
     
@@ -63,8 +70,12 @@ class VectorStoreManager:
         """Return cached embedding model (OpenAI or local HuggingFace)."""
         api_key = os.getenv('OPENAI_API_KEY')
         if api_key:
-            return _load_openai_embeddings(api_key)
-        return _load_huggingface_embeddings()
+            return OpenAIEmbeddings(
+                openai_api_key=api_key,
+                model="text-embedding-ada-002"
+            )
+        else:
+            return _load_huggingface_embeddings()
     
     def create_vector_store(self, documents: List[Document], 
                            collection_name: str = "documents"):
@@ -83,16 +94,12 @@ class VectorStoreManager:
             collection_name=collection_name
         )
         
-        # Persist to disk
-        self.vector_store.persist()
-        
         return self.vector_store
     
     def add_documents(self, documents: List[Document]):
         """Add new documents to existing vector store."""
         if self.vector_store:
             self.vector_store.add_documents(documents)
-            self.vector_store.persist()
     
     def similarity_search(self, query: str, k: int = 4) -> List[Document]:
         """

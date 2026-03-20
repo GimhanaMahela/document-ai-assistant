@@ -5,8 +5,8 @@ Provides UI for document upload, processing, and Q&A.
 
 import os
 
-# Must be set before any chromadb import (including via LangChain's Chroma wrapper)
-# Disables telemetry on ALL ChromaDB client instances, not just our explicit ones.
+# Must be set before any chromadb import (includes LangChain's internal Chroma).
+# Suppresses the PostHog API mismatch error on every startup.
 os.environ['ANONYMIZED_TELEMETRY'] = 'False'
 
 import streamlit as st
@@ -17,7 +17,7 @@ from typing import Optional
 
 from document_processor import DocumentProcessor
 from vector_store import VectorStoreManager
-from chat_engine import RAGChatEngine
+from chat_engine import RAGChatEngine, get_active_provider
 from database import DatabaseManager
 from utils import (
     setup_directories, validate_file_type, 
@@ -103,7 +103,30 @@ def render_sidebar():
                 </div>
             </div>
         """, unsafe_allow_html=True)
-        
+
+        # Active LLM provider badge
+        provider = get_active_provider()
+        badge_color = {
+            "Groq": "#2E7D32",
+            "OpenAI": "#6A1B9A",
+            "Local": "#E65100"
+        }.get(provider["provider"], "#37474F")
+
+        st.markdown(f"""
+            <div style="
+                background-color: {badge_color};
+                color: white;
+                padding: 5px 10px;
+                border-radius: 5px;
+                font-size: 0.75rem;
+                text-align: center;
+                margin-bottom: 12px;
+            ">
+                {provider['icon']} {provider['provider']} &nbsp;·&nbsp;
+                <code style="color: #ffffffcc;">{provider['model']}</code>
+            </div>
+        """, unsafe_allow_html=True)
+
         st.markdown("## 📁 Document Upload")
         
         # File uploader
